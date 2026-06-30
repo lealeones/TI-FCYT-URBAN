@@ -1,0 +1,8 @@
+Buildear y hacer esto
+
+cd /opt/urban-compose/bot-wsp
+sudo chown -R 1001:1001 bot_sessions tokens assets
+sudo chmod -R 755 bot_sessions tokens assets
+
+
+Levantar docker

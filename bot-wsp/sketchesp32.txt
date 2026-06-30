@@ -1,0 +1,67 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define SS_PIN 21   // GPIO21 para SS (SDA)
+#define RST_PIN 22  // GPIO22 para RST
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+const char* ssid = "Personal-915-2.4GHz";
+const char* password = "00439028922";
+
+const char* post_url = "http://localhost:3000/rfid/ping";
+
+void setup() {
+  Serial.begin(115200);
+  SPI.begin(18, 19, 23);  // SCK, MISO, MOSI (GPIO18,19,23)
+
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando a WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi conectado.");
+
+  rfid.PCD_Init();
+  Serial.println("Lector RFID listo.");
+}
+
+void loop() {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    delay(100);
+    return;
+  }
+
+  // Leer UID
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    uid += String(rfid.uid.uidByte[i] < 0x10 ? "0" : "");
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+  uid.toUpperCase();  // Ej: B31D7313
+  Serial.println("UID detectado: " + uid);
+
+  // Enviar POST
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(post_url);
+    http.addHeader("Content-Type", "application/json");
+
+    String jsonBody = "{\"id\": \"" + uid + "\"}";
+    Serial.println("Enviando POST: " + jsonBody);
+    int httpResponseCode = http.POST(jsonBody);
+
+    Serial.printf("Código de respuesta: %d\n", httpResponseCode);
+    String payload = http.getString();
+    Serial.println("Respuesta: " + payload);
+    http.end();
+  } else {
+    Serial.println("WiFi no conectado.");
+  }
+
+  rfid.PICC_HaltA();  // Detener comunicación
+  rfid.PCD_StopCrypto1();
+  delay(2000);  // Esperar antes de siguiente lectura
+}

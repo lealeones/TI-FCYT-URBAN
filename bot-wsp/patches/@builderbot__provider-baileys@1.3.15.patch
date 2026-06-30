@@ -1,0 +1,16 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 96df9de111b53cd97228e4fa05d46e7d24428459..c2d1fc0f7e9a5de1bc1afd1839b01f9561e8b882 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -31032,9 +31032,9 @@ class BaileysProvider extends bot.ProviderClass {
+                 this.initVendor().then((v) => this.listenOnEvents(v));
+             }
+             try {
+-                const sock = makeWASocketOther({
++                const sock = makeWASocketOther.makeWASocket({
+                     logger: loggerBaileys,
+-                    version: [2, 3000, 1025190524],
++                    version: this.globalVendorArgs.version ?? [2, 3000, 1025190524],
+                     printQRInTerminal: false,
+                     auth: {
+                         creds: state.creds,

@@ -1,0 +1,17 @@
+node_modules
+dist
+tmp
+.git
+.gitignore
+Dockerfile*
+docker-compose*
+**/*.log
+.env*
+coverage
+pnpm-lock.yamldist/*
+node_modules
+.env
+
+*_sessions
+*tokens
+.wwebjs*

@@ -1,0 +1,48 @@
+import { addKeyword, EVENTS, MemoryDB } from "@builderbot/bot";
+import { BaileysProvider } from "@builderbot/provider-baileys";
+import dayjs from "dayjs";
+import 'dayjs/locale/es';
+import { IaService } from "../../../../ia/ia.service";
+import { SessionsService } from "../../../../sessions/sessions.service";
+import { generateTimer } from "../../../utils/generateTimer";
+dayjs.locale('es');
+
+export const registerListSessionFlow = ({ iaService, sessionService }: { iaService: IaService, sessionService: SessionsService }) => {
+    return addKeyword<BaileysProvider, MemoryDB>(EVENTS.ACTION).addAnswer(`Buscando todas las clases:`)
+        .addAction(async (_, { flowDynamic }) => {
+            const clases = await sessionService.findAll();
+            if (!clases || clases.length === 0) {
+                await flowDynamic('❗ No hay clases registradas.');
+                return;
+            }
+            // Mapeamos cada sesión a una línea de salida
+            const lines = clases.map((clase) => {
+                // ID
+                const id = clase.customId;
+
+                // Descripción (hasta 40 chars)
+                let desc = clase.description!;
+                if (desc.length > 40) {
+                    desc = desc.slice(0, 40) + '…';
+                }
+
+                // Horarios
+                const horarios = clase.schedules?.map((i) => {
+                    const dia = i.dayOfWeek
+                        ? i.dayOfWeek
+                        : dayjs(i.specificDate!).format('DD-MM');
+                    const horaInicio = dayjs(i.startTime).format('HH:mm');
+                    const horaFin = dayjs(i.endTime).format('HH:mm');
+                    return `${dia} ${horaInicio}-${horaFin}`;
+                }).join(', ');
+
+                return `${id} | ${desc} | ${horarios}`;
+            });
+
+            // Enviamos todo en un solo mensaje
+            await flowDynamic( 'Estas son las clases registradas:' );
+             for (const line of lines) {
+                await flowDynamic([{ body: line.trim(), delay: generateTimer(150, 250) }]);
+            }
+        })
+};

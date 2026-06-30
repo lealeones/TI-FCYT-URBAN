@@ -1,0 +1,16 @@
+dist/*
+node_modules
+.vscode/*
+.env
+tmp/*
+!tmp/.gitkeep
+
+*_sessions
+*tokens
+.wwebjs*
+
+*.log
+*qr.png
+/src/generated/prisma
+*.Zone.Identifier
+

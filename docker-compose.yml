@@ -1,0 +1,87 @@
+version: '3.8'
+
+networks:
+  urban_network:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: postgres_urban
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: urban
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5431:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - urban_network
+  backend:
+    build:
+      context: ./bot-wsp
+      dockerfile: ./Dockerfile
+    container_name: urban_backend
+    env_file:
+      - .env
+    environment:
+      - PORT=3001
+      - PORT_WSP=3008
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./bot-wsp/bot_sessions:/app/bot_sessions
+      - ./bot-wsp/assets:/app/assets
+      - ./bot-wsp/tmp:/app/tmp
+      - bot_tokens:/app/tokens
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+  #  restart: unless-stopped
+    command: ["sh", "-c", "npx prisma migrate deploy && node --enable-source-maps --trace-uncaught --unhandled-rejections=strict dist/main.js"]
+    
+    networks:
+      - urban_network
+  frontend:
+    build:
+      context: ./front-urban
+      dockerfile: ./Dockerfile
+      # args:
+      #   NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL}
+      #   NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      #   NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      #   NEXT_PUBLIC_MIN_AUTH: ${NEXT_PUBLIC_MIN_AUTH}
+      #   NEXT_PUBLIC_DOCS_URL: ${NEXT_PUBLIC_DOCS_URL}
+      #   NEXT_PUBLIC_PRO_URL: ${NEXT_PUBLIC_PRO_URL}
+      #   NEXT_PUBLIC_REPO_NAME: ${NEXT_PUBLIC_REPO_NAME}
+    container_name: urban_frontend
+    # env_file:
+    #   - .env
+    environment:
+      - PORT=3000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - urban_network
+
+volumes:
+  postgres_data:
+  bot_tokens:

@@ -1,0 +1,119 @@
+import { addKeyword, EVENTS, MemoryDB } from "@builderbot/bot";
+import { TFlow } from "@builderbot/bot/dist/types";
+import { BaileysProvider } from "@builderbot/provider-baileys";
+import { InvoicesService } from "~/invoices/invoices.service";
+import { UserService } from "~/user/user.service";
+import { AuthService } from "../../../../auth/auth.service";
+import { IaService } from "../../../../ia/ia.service";
+import { exitFlow } from "../../../../whatsapp/utils/exitFlow";
+
+/**
+ * Props que el flujo de menú necesita.  
+ * Cada una de las propiedades es un *TFlow* que ya está definido en el
+ * árbol de flujos de la aplicación (por ejemplo `paymentStatusFlow`,
+ * `enrollClassFlow`, …).  Si algún flujo aún no está implementado,
+ * basta con pasar un flujo “placeholder” que solo envíe un mensaje de
+ * “en construcción”.
+ */
+type PropsUserMenu = {
+    /** Flujo que devuelve el estado de pago del usuario */
+    viewPaymentStatusFlow: TFlow<BaileysProvider, MemoryDB>;
+
+    /** Flujo que lista las clases a las que el usuario ya está inscrito */
+    viewEnrolledClassesFlow: TFlow<BaileysProvider, MemoryDB>;
+
+    /** Flujo que muestra las claves (códigos de acceso) nuevas que el usuario puede usar */
+    viewNewKeysFlow: TFlow<BaileysProvider, MemoryDB>;
+
+    /** Flujo que permite inscribirse a una clase nueva */
+    enrollNewClassesFlow: TFlow<BaileysProvider, MemoryDB>;
+
+    /** Servicio de IA (opcional, para “inteligente” interpretación de la respuesta) */
+    iaService: IaService;
+
+    /** Servicio de autenticación (para validar al usuario) */
+    authService: AuthService;
+
+    invoicesService: InvoicesService;
+    userService: UserService
+};
+
+/**
+ * Registra el menú de opciones que verá un usuario cuando envíe
+ * el evento `EVENTS.ACTION` (el “botón” de acción del flujo).
+ */
+export const registerUserMenu = ({
+    viewPaymentStatusFlow,
+    viewEnrolledClassesFlow,
+    viewNewKeysFlow,
+    enrollNewClassesFlow,
+    iaService,
+    authService,
+    invoicesService,
+    userService
+}: PropsUserMenu) => {
+    return addKeyword<BaileysProvider, MemoryDB>(EVENTS.ACTION)
+        /* ────────────────────────────────────────────────────────
+         * 1️⃣ Primer mensaje: saludo + lista de opciones
+         * ──────────────────────────────────────────────────────── */
+        .addAction(async (ctx, { flowDynamic }) => {
+            await flowDynamic(`👋 Hola ${ctx.name}!`, { delay: 300 });
+            await flowDynamic(
+                `💳 ¿Qué quieres hacer?\n\n` +
+                `1️⃣ Consultar estado de pago\n` +
+                `2️⃣ Consultar clases inscrito\n` +
+                `3️⃣ Consultar nuevas claves\n` +
+                `4️⃣ Inscribirse a nuevas clases\n\n` +
+                `Escribe *1*, *2*, *3*, *4* o *cancelar* para salir.`,
+                { delay: 300 },
+            );
+        })
+        /* ────────────────────────────────────────────────────────
+         * 2️⃣ Captura de la respuesta del usuario
+         * ──────────────────────────────────────────────────────── */
+        .addAction({ capture: true }, async ({ body, from, host }, { gotoFlow, endFlow, fallBack, flowDynamic, state }) => {
+            const input = body.trim().toLowerCase();
+
+            /* 2.1. Salir del flujo */
+            exitFlow(input, flowDynamic, endFlow, state);
+
+            /* 2.2. Enrutamiento por número */
+            if (input === "1") {
+                await flowDynamic(`🔄 Consultando estado de pago...`, { delay: 300 });
+
+                // buscar usuario
+                const usuario = await userService.findByPhone(from);
+                if (!usuario) {
+                    await flowDynamic(`❌Ocurrio un error,  no pudimos encontrarte en nuestro sistema.`, { delay: 300 });
+                    return endFlow();
+                }
+
+                const tieneFacturaPagada = await invoicesService.hasPaidInvoiceThisMonth(usuario.id);
+
+                if (tieneFacturaPagada) {
+                    await flowDynamic(`✅ Tu estado de pago está al día. ¡Muchas Gracias!`, { delay: 300 });
+                    return endFlow();
+                } else {
+
+                  //  const linkPayment 
+                    await flowDynamic(`❌ Tu estado de pago está *pendiente*. Por favor, realiza el pago a la brevedad.`, { delay: 300 });
+                }
+
+                await flowDynamic(`✅ Estado de pago consultado con éxito.`, { delay: 300 });
+
+                return gotoFlow(viewPaymentStatusFlow); // este se resuelve con un flowDynamic
+
+            }
+
+
+
+            if (input === "2") return gotoFlow(viewEnrolledClassesFlow);
+            if (input === "3") return gotoFlow(viewNewKeysFlow);
+            if (input === "4") return gotoFlow(enrollNewClassesFlow);
+
+            /* 2.3. Respuesta inválida */
+            return fallBack(
+                `❌ Opción no válida. Escribe *1*, *2*, *3*, *4* o *cancelar*`,
+            );
+        });
+};

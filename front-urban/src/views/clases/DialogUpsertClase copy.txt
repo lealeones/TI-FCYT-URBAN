@@ -1,0 +1,633 @@
+'use client';
+
+import { useUserAuth } from '@/app/context/UserAuth';
+import { Instructor } from '@/app/modules/users/dto/instructor.dto';
+import CustomDialog from '@/utils/CustomDialog';
+import { diasSemana } from '@/utils/diasSemana';
+import { parseLocalDate } from '@/utils/parseLocalDate';
+
+import { Delete } from '@mui/icons-material';
+import {
+    Box,
+    Button,
+    Checkbox,
+    Divider,
+    FormControl,
+    FormControlLabel,
+    FormGroup,
+    Grid,
+    IconButton,
+    Radio,
+    RadioGroup,
+    Snackbar,
+    TextField,
+    Typography,
+} from '@mui/material';
+import type { AlertProps } from '@mui/material/Alert';
+import MuiAlert from '@mui/material/Alert';
+import Autocomplete from '@mui/material/Autocomplete';
+import axios from 'axios';
+import React, { useEffect, useState } from 'react';
+
+
+const Alert = React.forwardRef<HTMLDivElement, AlertProps>(function Alert(props, ref) {
+    return <MuiAlert elevation={6} variant="filled" ref={ref} {...props} />;
+});
+
+/** Helpers de fecha/hora (local → ISO y viceversa) */
+function ymdFromLocalDate(d: Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`; // YYYY-MM-DD en local
+}
+function buildLocalISO(yyyyMmDd: string, hhmm: string) {
+    const [y, m, d] = yyyyMmDd.split('-').map(Number);
+    const [hh, mm] = (hhmm || '00:00').split(':').map(Number);
+    const local = new Date(y, m - 1, d, hh, mm, 0, 0); // construye en hora local
+    return local.toISOString(); // ISO (UTC) para backend
+}
+function hhmmFromISOToLocal(iso: string) {
+    const dt = new Date(iso);
+    return dt.toTimeString().slice(0, 5); // HH:mm
+}
+function ymdFromISOToLocal(iso: string) {
+    const dt = new Date(iso);
+    return ymdFromLocalDate(dt); // YYYY-MM-DD según TZ local
+}
+
+export const DialogUpsertClase = ({
+    open,
+    clase,
+    onClose,
+    onRefresh,
+}: {
+    open: boolean;
+    clase?: any;
+    onClose: () => void;
+    onRefresh: () => Promise<void>;
+}) => {
+    const { token } = useUserAuth();
+    const [instructores, setInstructores] = useState<Instructor[]>([]);
+    const [openSnackbar, setOpenSnackbar] = useState(false);
+    const [tipo, setTipo] = useState<'recurrente' | 'puntual'>('recurrente');
+    const [nombre, setNombre] = useState('');
+    const [profesor, setProfesor] = useState('');
+    const [dias, setDias] = useState<string[]>([]);
+    const [rangoFechas, setRangoFechas] = useState({ desde: '', hasta: '' }); // YYYY-MM-DD local
+    const [horarios, setHorarios] = useState<Record<string, { inicio: string; fin: string }>>({});
+    const [fechasPuntuales, setFechasPuntuales] = useState<{ fecha: string; inicio: string; fin: string }[]>([]);
+    const [errorNombre, setErrorNombre] = useState(false);
+    const [errorFechas, setErrorFechas] = useState(false);
+
+    const [snackbarText, setSnackbarText] = useState('');
+    const [mode, setMode] = useState<'create' | 'edit'>('create');
+
+    useEffect(() => {
+        if (open) setMode(clase?.id ? 'edit' : 'create');
+    }, [open, clase?.id]);
+
+    const diasEnIngles: Record<string, number> = {
+        Lunes: 1,
+        Martes: 2,
+        Miércoles: 3,
+        Jueves: 4,
+        Viernes: 5,
+        Sábado: 6,
+        Domingo: 0,
+    };
+
+    const handleDiaChange = (dia: string) => {
+        setDias((prev) => (prev.includes(dia) ? prev.filter((d) => d !== dia) : [...prev, dia]));
+    };
+
+    const addFechaPuntual = () => {
+        setFechasPuntuales([...fechasPuntuales, { fecha: '', inicio: '', fin: '' }]);
+    };
+
+    const updateFechaPuntual = (index: number, key: keyof (typeof fechasPuntuales)[0], value: string) => {
+        const nuevas = [...fechasPuntuales];
+        nuevas[index][key] = value;
+        setFechasPuntuales(nuevas);
+    };
+
+    const removeFechaPuntual = (index: number) => {
+        setFechasPuntuales((prev) => prev.filter((_, i) => i !== index));
+    };
+
+    const handleCrearClase = async () => {
+        setErrorNombre(false);
+        setErrorFechas(false);
+
+        if (!nombre.trim()) {
+            setErrorNombre(true);
+            return;
+        }
+
+        // Calculamos fechas en LOCAL y convertimos a ISO (strings) para enviar
+        let fechasISO: { start: string; end: string }[] = [];
+        let startDateISO: string | null = null;
+        let endDateISO: string | null = null;
+
+        if (tipo === 'recurrente') {
+            if (!rangoFechas.desde || !rangoFechas.hasta) {
+                setErrorFechas(true);
+                return;
+            }
+
+            const start = parseLocalDate(rangoFechas.desde);
+            const end = parseLocalDate(rangoFechas.hasta);
+            const diasSeleccionados = dias.map((d) => diasEnIngles[d]); // 0..6
+
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                const current = new Date(d);
+                const weekday = current.getDay(); // 0=Dom..6=Sáb (local)
+                if (diasSeleccionados.includes(weekday)) {
+                    const nombreDia = diasSemana[(weekday + 6) % 7]; // Lunes..Domingo
+                    const cfg = horarios[nombreDia];
+                    if (cfg?.inicio && cfg?.fin) {
+                        const ymd = ymdFromLocalDate(current); // YYYY-MM-DD en local
+                        fechasISO.push({
+                            start: buildLocalISO(ymd, cfg.inicio),
+                            end: buildLocalISO(ymd, cfg.fin),
+                        });
+                    }
+                }
+            }
+
+            if (fechasISO.length === 0) {
+                setErrorFechas(true);
+                return;
+            }
+
+            startDateISO = fechasISO[0].start;
+            endDateISO = fechasISO[fechasISO.length - 1].end;
+        } else {
+            // puntual
+            const validas = fechasPuntuales
+                .filter((f) => f.fecha)
+                .map((f) => ({
+                    start: buildLocalISO(f.fecha, f.inicio || '00:00'),
+                    end: buildLocalISO(f.fecha, f.fin || '00:00'),
+                }));
+
+            if (validas.length === 0) {
+                setErrorFechas(true);
+                return;
+            }
+
+            fechasISO = validas;
+            startDateISO = validas.map((v) => v.start).sort()[0];
+            endDateISO = validas.map((v) => v.end).sort().slice(-1)[0];
+        }
+
+        const payload = {
+            id: clase?.id, // UPSERT
+            title: nombre,
+            profesor: { customId: profesor },
+            type: tipo === 'recurrente' ? 'RECURRING' : 'ONE_TIME',
+            days: tipo === 'recurrente' ? dias.map((d) => d.toLowerCase()) : null,
+            dates: fechasISO, // ISO strings
+            startDate: startDateISO, // ISO string
+            endDate: endDateISO, // ISO string
+        };
+
+        try {
+            const res = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sessions/upsert`, payload, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            console.log('✅ Clase creada/actualizada:', res.data);
+            onClose();
+            // Reset
+            setNombre('');
+            setProfesor('');
+            setTipo('recurrente');
+            setDias([]);
+            setRangoFechas({ desde: '', hasta: '' });
+            setHorarios({});
+            setFechasPuntuales([]);
+            setErrorFechas(false);
+
+            const wasEdit = Boolean(clase?.id);
+            setSnackbarText(wasEdit ? 'La clase fue actualizada exitosamente.' : 'La clase fue creada exitosamente.');
+            setOpenSnackbar(true);
+            await onRefresh();
+        } catch (err) {
+            console.error('❌ Error al guardar clase:', err);
+        }
+    };
+
+    /** Precarga de datos para EDITAR: ISO (UTC) → local para inputs */
+    useEffect(() => {
+        if (!clase) return;
+
+        setNombre(clase.description || '');
+        setTipo(clase.type === 'RECURRING' ? 'recurrente' : 'puntual');
+        setProfesor(clase.instructors?.[0]?.customId || '');
+
+        if (clase.startDate && clase.endDate) {
+            setRangoFechas({
+                desde: ymdFromISOToLocal(clase.startDate),
+                hasta: ymdFromISOToLocal(clase.endDate),
+            });
+        }
+
+        const dayIndexToNombre = (d: number) => diasSemana[(d + 6) % 7];
+        const dates = extractDatesFromClase(clase);
+
+        if (dates.length > 0) {
+            if (clase.type === 'RECURRING') {
+                const setDiasSel = new Set<string>();
+                const h: Record<string, { inicio: string; fin: string }> = {};
+
+                for (const d of dates) {
+                    const localStart = new Date(d.start); // UTC → local
+                    const nombreDia = dayIndexToNombre(localStart.getDay()); // Lunes..Domingo
+                    setDiasSel.add(nombreDia);
+
+                    if (!h[nombreDia]) {
+                        h[nombreDia] = {
+                            inicio: hhmmFromISOToLocal(d.start),
+                            fin: hhmmFromISOToLocal(d.end),
+                        };
+                    }
+                }
+
+                setDias(Array.from(setDiasSel));
+                setHorarios(h);
+                setFechasPuntuales([]);
+            } else {
+                const fechasFormateadas = dates.map((d) => ({
+                    fecha: ymdFromISOToLocal(d.start),
+                    inicio: hhmmFromISOToLocal(d.start),
+                    fin: hhmmFromISOToLocal(d.end),
+                }));
+                setFechasPuntuales(fechasFormateadas);
+                setDias([]);
+                setHorarios({});
+            }
+        } else {
+            setDias([]);
+            setHorarios({});
+            setFechasPuntuales([]);
+        }
+    }, [clase]);
+
+    useEffect(() => {
+        axios
+            .get<Instructor[]>('http://localhost:3001/users/instructor', {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            })
+            .then((res) => setInstructores(res.data))
+            .catch((err) => console.error('❌ Error al obtener instructores:', err));
+    }, []);
+
+    const isFormReady =
+        !!nombre &&
+        (tipo === 'puntual'
+            ? fechasPuntuales.length > 0 && fechasPuntuales.every((f) => f.fecha && f.inicio && f.fin)
+            : dias.length > 0 && Object.keys(horarios).length > 0 && !!rangoFechas.desde && !!rangoFechas.hasta);
+
+    return (
+        <>
+            <CustomDialog
+                open={open}
+                onClose={onClose}
+                maxWidth="md"
+                title={clase?.id ? 'Editar clase' : 'Crear nueva clase'}
+                actions={
+                    <Button onClick={handleCrearClase} variant="contained" disabled={!isFormReady}>
+                        {clase?.id ? 'Guardar cambios' : 'Crear clase'}
+                    </Button>
+                }
+            >
+                <Box
+                    sx={{
+                        p: 2.5,
+                        borderRadius: 3,
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                    }}
+                >
+                    <TextField
+                        label="Nombre"
+                        value={nombre}
+                        onChange={(e) => setNombre(e.target.value)}
+                        fullWidth
+                        error={errorNombre}
+                        helperText={errorNombre ? 'El nombre es obligatorio' : ''}
+                        variant="filled"
+                        InputLabelProps={{ shrink: true }}
+                        sx={{
+                            '& .MuiFilledInput-root': {
+                                backgroundColor: 'rgba(255,255,255,0.04)',
+                                borderRadius: 2,
+                                '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                            },
+                        }}
+                    />
+
+                    <Box mt={2}>
+                        <Autocomplete
+                            options={instructores}
+                            getOptionLabel={(option) => option.name}
+                            renderInput={(params) => (
+                                <TextField
+                                    {...params}
+                                    label="Profesor"
+                                    fullWidth
+                                    variant="filled"
+                                    InputLabelProps={{ shrink: true }}
+                                    sx={{
+                                        '& .MuiFilledInput-root': {
+                                            backgroundColor: 'rgba(255,255,255,0.04)',
+                                            borderRadius: 2,
+                                            '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                            '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                        },
+                                    }}
+                                />
+                            )}
+                            value={instructores.find((i) => i.customId === profesor) || null}
+                            onChange={(_, newValue) => {
+                                setProfesor(newValue?.customId || '');
+                            }}
+                            isOptionEqualToValue={(option, value) => option.customId === value.customId}
+                        />
+                    </Box>
+                </Box>
+
+                <Divider sx={{ borderColor: 'rgba(255,255,255,0.06)' }} />
+
+                <Box
+                    sx={{
+                        p: 2.5,
+                        borderRadius: 3,
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                    }}
+                >
+                    <FormControl>
+                        <Typography sx={{ mb: 1.5, fontWeight: 600 }}>¿La clase es recurrente o puntual?</Typography>
+                        <RadioGroup row value={tipo} onChange={(e) => setTipo(e.target.value as any)}>
+                            <FormControlLabel value="recurrente" control={<Radio color="primary" />} label="Recurrente" sx={{ mr: 2 }} />
+                            <FormControlLabel value="puntual" control={<Radio color="primary" />} label="Puntual" />
+                        </RadioGroup>
+                    </FormControl>
+
+                    {tipo === 'recurrente' && (
+                        <Box mt={2}>
+                            <FormGroup
+                                row
+                                sx={{
+                                    p: 1.5,
+                                    borderRadius: 2,
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: '1px solid rgba(255,255,255,0.06)',
+                                }}
+                            >
+                                {diasSemana.map((dia) => (
+                                    <FormControlLabel
+                                        key={dia}
+                                        control={<Checkbox checked={dias.includes(dia)} onChange={() => handleDiaChange(dia)} color="primary" />}
+                                        label={dia}
+                                        sx={{ minWidth: 120, mr: 1 }}
+                                    />
+                                ))}
+                            </FormGroup>
+
+                            <Grid container spacing={2} mt={0.5}>
+                                <Grid item xs={12} md={6}>
+                                    <TextField
+                                        label="Desde"
+                                        type="date"
+                                        fullWidth
+                                        variant="filled"
+                                        InputLabelProps={{ shrink: true }}
+                                        value={rangoFechas.desde}
+                                        onChange={(e) => setRangoFechas((r) => ({ ...r, desde: e.target.value }))}
+                                        sx={{
+                                            '& .MuiFilledInput-root': {
+                                                backgroundColor: 'rgba(255,255,255,0.04)',
+                                                borderRadius: 2,
+                                                '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                            },
+                                        }}
+                                    />
+                                </Grid>
+                                <Grid item xs={12} md={6}>
+                                    <TextField
+                                        label="Hasta"
+                                        type="date"
+                                        fullWidth
+                                        variant="filled"
+                                        InputLabelProps={{ shrink: true }}
+                                        value={rangoFechas.hasta}
+                                        onChange={(e) => setRangoFechas((r) => ({ ...r, hasta: e.target.value }))}
+                                        sx={{
+                                            '& .MuiFilledInput-root': {
+                                                backgroundColor: 'rgba(255,255,255,0.04)',
+                                                borderRadius: 2,
+                                                '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                            },
+                                        }}
+                                    />
+                                </Grid>
+                            </Grid>
+
+                            {dias.map((dia) => (
+                                <Grid container spacing={2} key={dia} mt={0.5}>
+                                    <Grid item xs={12} md={6}>
+                                        <TextField
+                                            label={`Hora inicio (${dia})`}
+                                            type="time"
+                                            fullWidth
+                                            variant="filled"
+                                            InputLabelProps={{ shrink: true }}
+                                            value={horarios[dia]?.inicio || ''}
+                                            onChange={(e) =>
+                                                setHorarios((h) => ({
+                                                    ...h,
+                                                    [dia]: { ...h[dia], inicio: e.target.value },
+                                                }))
+                                            }
+                                            sx={{
+                                                '& .MuiFilledInput-root': {
+                                                    backgroundColor: 'rgba(255,255,255,0.04)',
+                                                    borderRadius: 2,
+                                                    '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                    '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                                },
+                                            }}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12} md={6}>
+                                        <TextField
+                                            label={`Hora fin (${dia})`}
+                                            type="time"
+                                            fullWidth
+                                            variant="filled"
+                                            InputLabelProps={{ shrink: true }}
+                                            value={horarios[dia]?.fin || ''}
+                                            onChange={(e) =>
+                                                setHorarios((h) => ({
+                                                    ...h,
+                                                    [dia]: { ...h[dia], fin: e.target.value },
+                                                }))
+                                            }
+                                            sx={{
+                                                '& .MuiFilledInput-root': {
+                                                    backgroundColor: 'rgba(255,255,255,0.04)',
+                                                    borderRadius: 2,
+                                                    '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                    '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                                },
+                                            }}
+                                        />
+                                    </Grid>
+                                </Grid>
+                            ))}
+                        </Box>
+                    )}
+
+                    {tipo === 'puntual' && (
+                        <Box mt={2}>
+                            {fechasPuntuales.map((item, index) => (
+                                <Grid container spacing={2} key={index} alignItems="center" sx={{ mb: 0.5 }}>
+                                    <Grid item xs={12} md={3}>
+                                        <TextField
+                                            label="Fecha"
+                                            type="date"
+                                            fullWidth
+                                            variant="filled"
+                                            InputLabelProps={{ shrink: true }}
+                                            value={item.fecha}
+                                            onChange={(e) => updateFechaPuntual(index, 'fecha', e.target.value)}
+                                            sx={{
+                                                '& .MuiFilledInput-root': {
+                                                    backgroundColor: 'rgba(255,255,255,0.04)',
+                                                    borderRadius: 2,
+                                                    '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                    '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                                },
+                                            }}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12} md={3}>
+                                        <TextField
+                                            label="Hora inicio"
+                                            type="time"
+                                            fullWidth
+                                            variant="filled"
+                                            InputLabelProps={{ shrink: true }}
+                                            value={item.inicio}
+                                            onChange={(e) => updateFechaPuntual(index, 'inicio', e.target.value)}
+                                            sx={{
+                                                '& .MuiFilledInput-root': {
+                                                    backgroundColor: 'rgba(255,255,255,0.04)',
+                                                    borderRadius: 2,
+                                                    '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                    '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                                },
+                                            }}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12} md={3}>
+                                        <TextField
+                                            label="Hora fin"
+                                            type="time"
+                                            fullWidth
+                                            variant="filled"
+                                            InputLabelProps={{ shrink: true }}
+                                            value={item.fin}
+                                            onChange={(e) => updateFechaPuntual(index, 'fin', e.target.value)}
+                                            sx={{
+                                                '& .MuiFilledInput-root': {
+                                                    backgroundColor: 'rgba(255,255,255,0.04)',
+                                                    borderRadius: 2,
+                                                    '&:hover': { backgroundColor: 'rgba(255,255,255,0.06)' },
+                                                    '&.Mui-focused': { backgroundColor: 'rgba(255,255,255,0.07)' },
+                                                },
+                                            }}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12} md={3}>
+                                        <IconButton
+                                            onClick={() => removeFechaPuntual(index)}
+                                            aria-label="Eliminar"
+                                            color="error"
+                                            sx={{
+                                                bgcolor: 'rgba(244,67,54,0.08)',
+                                                '&:hover': { bgcolor: 'rgba(244,67,54,0.18)' },
+                                            }}
+                                        >
+                                            <Delete />
+                                        </IconButton>
+                                    </Grid>
+                                </Grid>
+                            ))}
+                            <Button
+                                onClick={addFechaPuntual}
+                                variant="outlined"
+                                sx={{
+                                    mt: 1,
+                                    borderRadius: 2,
+                                    borderColor: 'rgba(255,255,255,0.18)',
+                                    color: '#e6edf3',
+                                    textTransform: 'none',
+                                    px: 2,
+                                    '&:hover': {
+                                        borderColor: 'rgba(255,255,255,0.28)',
+                                        backgroundColor: 'rgba(255,255,255,0.04)',
+                                    },
+                                }}
+                            >
+                                Agregar otro día
+                            </Button>
+                        </Box>
+                    )}
+
+                    {errorFechas && (
+                        <Typography color="error" sx={{ mt: 1 }}>
+                            Debe ingresar al menos una fecha válida.
+                        </Typography>
+                    )}
+                </Box>
+            </CustomDialog>
+
+            {openSnackbar && (
+                <Snackbar
+                    open={openSnackbar}
+                    autoHideDuration={3000}
+                    onClose={() => setOpenSnackbar(false)}
+                    anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+                >
+                    <Alert onClose={() => setOpenSnackbar(false)} severity="success">
+                        {snackbarText}
+                    </Alert>
+                </Snackbar>
+            )}
+        </>
+    );
+};
+
+export default DialogUpsertClase;
+
+/** Extrae [{start,end}] indistintamente si viene como `dates` o `SessionDateSnapshot` */
+function extractDatesFromClase(clase: any): Array<{ start: string; end: string }> {
+    if (Array.isArray(clase?.dates) && clase.dates.length > 0) {
+        return clase.dates;
+    }
+    if (Array.isArray(clase?.SessionDateSnapshot) && clase.SessionDateSnapshot.length > 0) {
+        return clase.SessionDateSnapshot
+            .filter((s: any) => s?.dateRange?.start && s?.dateRange?.end)
+            .map((s: any) => ({ start: s.dateRange.start, end: s.dateRange.end }));
+    }
+    return [];
+}

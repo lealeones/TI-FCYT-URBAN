@@ -1,0 +1,49 @@
+# Build artifacts
+dist/*
+node_modules
+
+# Environment files (excepto plantillas)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Runtime data
+*_sessions
+*tokens
+.wwebjs*
+tmp/*
+
+# Git y control de versiones
+.git
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+
+# IDE y editores
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Testing
+coverage
+.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archivos temporales
+*.tmp
+*.bak
+
+# README y docs (opcional, comentar si los necesitas)
+README.md

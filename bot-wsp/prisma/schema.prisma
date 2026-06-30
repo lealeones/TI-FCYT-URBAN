@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Un ejemplo de modelo "User"
+model User {
+  id                        String                @id @default(cuid())
+  customId                  String?
+  name                      String
+  dni                       String?
+  phone                     String?
+  birth                     DateTime?
+  rfid                      String?
+  deleted                   DateTime?
+  role                      UserRole              @default(USER)
+  profilePicture            String?
+  profilePictureUpdatedAt   DateTime?
+  createdAt                 DateTime              @default(now())
+  AccessLog                 AccessLog[]
+  invoices                  Invoice[]
+  tokens                    Token[]
+  assistantSessions         Session[]             @relation("AssistantSessions")
+  instructorSessions        Session[]             @relation("InstructorSessions")
+  presentAssistantsOnDates  SessionDateSnapshot[] @relation("PresentAssistantsOnDate")
+  presentInstructorsOnDates SessionDateSnapshot[] @relation("PresentInstructorsOnDate")
+  SessionDateSnapshot       SessionDateSnapshot[] @relation("SubstituteInstructorsOnDate")
+}
+
+/// Registro de acceso de un usuario
+model AccessLog {
+  id        String       @id @default(cuid())
+  userId    String
+  direction LogDirection
+  timestamp DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id])
+
+  @@index([userId, timestamp])
+}
+
+model Token {
+  id          String   @id @default(cuid())
+  userId      String?
+  token       String   @unique
+  isActive    Boolean  @default(true)
+  redirectUrl String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id])
+}
+
+model Session {
+  id                  String                @id @default(cuid())
+  customId            String                @unique
+  description         String
+  type                SessionType
+  startDate           DateTime?
+  endDate             DateTime?
+  isActive            Boolean               @default(true)
+  amount              Float?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  invoices            Invoice[]
+  dates               SessionDateRange[]
+  SessionDateSnapshot SessionDateSnapshot[]
+  priceHistories      SessionPriceHistory[]
+  assistants          User[]                @relation("AssistantSessions")
+  instructors         User[]                @relation("InstructorSessions")
+}
+
+model SessionPriceHistory {
+  id            String    @id @default(cuid())
+  sessionId     String
+  amount        Float
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model SessionDateRange {
+  id                  String                @id @default(cuid())
+  start               DateTime
+  end                 DateTime
+  sessionId           String
+  session             Session               @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  SessionDateSnapshot SessionDateSnapshot[]
+}
+
+model SessionDateSnapshot {
+  id                    String           @id @default(cuid())
+  dateRangeId           String
+  sessionId             String
+  notes                 String?
+  isActive              Boolean          @default(true)
+  createdAt             DateTime         @default(now())
+  dateRange             SessionDateRange @relation(fields: [dateRangeId], references: [id])
+  session               Session          @relation(fields: [sessionId], references: [id])
+  presentAssistants     User[]           @relation("PresentAssistantsOnDate")
+  presentInstructors    User[]           @relation("PresentInstructorsOnDate")
+  substituteInstructors User[]           @relation("SubstituteInstructorsOnDate")
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  userId        String
+  sessionId     String
+  base64Invoice String?
+  linkPayment   String?
+  status        InvoiceStatus @default(PENDING)
+  amount        Float
+  dateInvoice   DateTime
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  session       Session       @relation(fields: [sessionId], references: [id])
+  user          User          @relation(fields: [userId], references: [id])
+
+  @@index([userId, dateInvoice])
+  @@index([sessionId, dateInvoice])
+}
+
+model SystemConfig {
+  id                               String   @id @default(cuid())
+  sessionCleanupIntervalMinutes    Int      @default(30)
+  invoiceGenerationDayOfMonth      Int      @default(1)
+  tokenExpirationMinutes           Int      @default(30)
+  tokenCleanupIntervalMinutes      Int      @default(60)
+  profilePictureUpdateIntervalDays Int      @default(2)
+  updatedAt                        DateTime @updatedAt
+  createdAt                        DateTime @default(now())
+}
+
+enum UserRole {
+  ADMIN
+  INSTRUCTOR
+  USER
+  GUEST
+}
+
+/// Dirección de un registro (INGRESO o EGRESO)
+enum LogDirection {
+  INGRESS
+  EGRESS
+}
+
+enum SessionType {
+  RECURRING
+  ONE_TIME
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  CANCELED
+}

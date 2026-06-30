@@ -1,0 +1,1 @@
+export type DeactivateBody = { modelId: string, model: 'session' | 'snapshot' }

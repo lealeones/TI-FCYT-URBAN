@@ -1,0 +1,85 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+export async function middleware(request: NextRequest) {
+  const url = request.nextUrl
+  const tokenFromUrl = url.searchParams.get('t')
+  const cookieValue = request.cookies.get('authToken')?.value
+
+  let token: string | undefined = undefined
+  let shouldRevalidate = false
+
+  // 1. Si viene en la URL, usalo y forzá revalidación
+  if (tokenFromUrl) {
+    token = tokenFromUrl
+    shouldRevalidate = true
+  } else if (cookieValue) {
+    try {
+      const parsed = JSON.parse(cookieValue)
+      token = parsed.token
+
+      const ageInMs = Date.now() - parsed.validatedAt
+      const fiveMinutes = 5 * 60 * 1000
+      shouldRevalidate = ageInMs > fiveMinutes
+    } catch {
+      console.warn('⚠️ Cookie malformada')
+      token = undefined
+    }
+  }
+
+  if (!token) {
+    console.warn('⛔ No token found')
+    return NextResponse.redirect(new URL('/unauthorized', request.url))
+  }
+
+  try {
+    let autorizado = true
+
+    if (shouldRevalidate) {
+      const verifyResponse = await fetch(`http://localhost:3001/auth/verify?t=${token}`)
+      const data = await verifyResponse.json()
+      autorizado = data.autorizado
+    }
+
+    if (!autorizado) {
+      console.warn('⛔ Token inválido')
+      return NextResponse.redirect(new URL('/unauthorized', request.url))
+    }
+
+    const payload = JSON.stringify({ token, validatedAt: Date.now() })
+
+    if (tokenFromUrl) {
+      const cleanUrl = new URL(request.url)
+      cleanUrl.searchParams.delete('t')
+
+      const redirectResponse = NextResponse.redirect(cleanUrl, 307)
+      redirectResponse.cookies.set('authToken', payload, {
+        path: '/',
+        maxAge: 60 * 60, // 1 hora total
+        sameSite: 'lax',
+        secure: false, // true en producción con HTTPS
+      })
+
+      return redirectResponse
+    }
+
+    if (shouldRevalidate) {
+      const response = NextResponse.next()
+      response.cookies.set('authToken', payload, {
+        path: '/',
+        maxAge: 60 * 60,
+        sameSite: 'lax',
+        secure: false,
+      })
+      return response
+    }
+
+    return NextResponse.next()
+  } catch (error) {
+    console.error('💥 Error al verificar token:', error)
+    return NextResponse.redirect(new URL('/unauthorized', request.url))
+  }
+}
+
+export const config = {
+  matcher: ['/((?!_next|favicon.ico|unauthorized|api).*)'],
+}
