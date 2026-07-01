@@ -270,6 +270,7 @@ Este comando construye y levanta los servicios principales:
 * Backend NestJS
 * Servicio QR / WhatsApp
 * Frontend NextJS
+* Odoo ERP
 
 Verificar que los puertos requeridos estén disponibles antes de iniciar el despliegue.
 
@@ -416,6 +417,56 @@ El servicio queda disponible en:
 ```bash
 http://localhost:3000
 ```
+
+---
+
+# Odoo ERP
+
+Ubicación:
+
+```bash
+./
+```
+
+Versión utilizada:
+
+```bash
+Odoo 18.0 CE
+```
+
+## Variables de entorno
+
+El Odoo cuenta con un archivo .env para su configuracion de despliegue en el docker-compose:
+
+```bash
+.env
+```
+
+Antes de iniciar el servicio, revisar y completar las variables de entorno necesarias.
+
+## Despliegue y configuracion del entorno Odoo ERP:
+
+### Crear la base:
+1) localhost:8069/web/database/manager.
+2) Completá: nombre de la base, email y contraseña del admin.
+3) Elegí el idioma Español (AR).
+4) País: Argentina (esto activa sugerencias de localización más adelante).
+5) Presionar boton Crear instancia
+
+### Configurar la localización argentina
+1) En aplicaciones instalar la aplicacion l10n_ar
+2) Configurá los datos fiscales de tu compañía: Ajustes → Empresas → tu compañía → completá CUIT, condición ante IVA, y los puntos de venta (Responsable Inscripto, Monotributo, etc.).
+3) Si vas a facturar electrónicamente, necesitás cargar el certificado AFIP en Contabilidad → Configuración → Diarios (configuración del punto de venta electrónico).
+
+### Instalar aplicacion de Mercado Pago
+1) En aplicaciones, buscá "Mercado Pago" e instalarlo.
+2) En Ajustes → Sitio Web → Pagos (o Contabilidad/Ventas → Configuración → Proveedores de pago). Abrí "Mercado Pago", poné tus credenciales (Access Token y Public Key, que sacás desde tu cuenta de desarrollador de Mercado Pago).
+3) Activalo (pasarlo de "Deshabilitado" a "Habilitado" o "Modo prueba" primero para testear).
+
+### Configuracion de API
+1) En aplicaciones instalar la aplicacion account_api
+2) Ingresa a "Ajustes -> Tecnico -> Parametros del sistema", buscar el registro "account.api.invoice.state.webhook" y proceder a establecer en el valor la URL del frontend. Su data de ejm actual es: https://libraries-exclusive-vernon-device.trycloudflare.com/odoo/webhook
+
 
 ---
 

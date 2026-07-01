@@ -82,6 +82,36 @@ services:
     networks:
       - urban_network
 
+  odoo:
+    image: "${ODOO_IMAGE}:${ODOO_VERSION}"
+    container_name: "${ODOO_CONTAINER_NAME}"
+    depends_on:
+      - db
+    ports:
+      - "${ODOO_PORT}:8069"
+    environment:
+      - HOST=db
+      - USER=${DB_USER}
+      - PASSWORD=${DB_PASSWORD}
+    volumes:
+      - ./config/odoo.conf:/etc/odoo/odoo.conf
+      - ./extra-addons:/mnt/extra-addons
+      - odoo-data:/var/lib/odoo
+
+  db:
+    image: postgres:13
+    container_name: "${DB_CONTAINER_NAME}"
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
 volumes:
   postgres_data:
   bot_tokens:
+  odoo-data: {}
+  db-data: {}
